@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Password Vault</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --card: #ffffff;
+    --text: #1b1d22;
+    --muted: #626876;
+    --border: #dde0e6;
+    --accent: #2f6fed;
+    --accent-text: #ffffff;
+    --field: #f0f2f5;
+    --danger: #c93c3c;
+    --ok: #2f9e5a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121418;
+      --card: #1b1e24;
+      --text: #e8eaee;
+      --muted: #9aa1ad;
+      --border: #2c3039;
+      --accent: #5b8ff9;
+      --accent-text: #0b0d10;
+      --field: #23272f;
+      --danger: #ef6b6b;
+      --ok: #4cc47e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex;
+    justify-content: center;
+    padding: 40px 16px;
+  }
+  main { width: 100%; max-width: 640px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  h2 { font-size: 1.1rem; margin: 0 0 12px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  label { display: block; font-size: .9rem; color: var(--muted); margin: 12px 0 4px; }
+  input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--field);
+    color: var(--text);
+    font: inherit;
+  }
+  input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .btn {
+    border: none;
+    border-radius: 8px;
+    padding: 10px 16px;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    background: var(--accent);
+    color: var(--accent-text);
+  }
+  .btn.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
+  .btn.danger { background: transparent; color: var(--danger); border: 1px solid var(--border); }
+  .btn.small { padding: 6px 10px; font-size: .85rem; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row > input { flex: 1; min-width: 0; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+  .msg { font-size: .9rem; margin: 10px 0 0; min-height: 1.5em; }
+  .msg.error { color: var(--danger); }
+  .msg.ok { color: var(--ok); }
+  .hidden { display: none !important; }
+  .topbar { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .entry {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-top: 10px;
+  }
+  .entry-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .entry-site { font-weight: 600; overflow-wrap: anywhere; }
+  .entry-user { color: var(--muted); font-size: .9rem; overflow-wrap: anywhere; }
+  .entry-pass {
+    font-family: ui-monospace, Consolas, monospace;
+    background: var(--field);
+    border-radius: 6px;
+    padding: 6px 10px;
+    margin: 8px 0;
+    overflow-wrap: anywhere;
+  }
+  .empty { color: var(--muted); text-align: center; padding: 20px 0; }
+  details { font-size: .95rem; }
+  summary { cursor: pointer; font-weight: 600; }
+  details p { color: var(--muted); margin: 8px 0 0; }
+  .warn { font-size: .85rem; color: var(--muted); border-left: 3px solid var(--danger); padding-left: 10px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Password Vault</h1>
+  <p class="sub">Your passwords, encrypted with AES-256 inside this browser. Nothing is sent anywhere.</p>
+
+  <!-- 1. First visit: create a vault -->
+  <section class="card hidden" id="setup-screen">
+    <h2>Create your vault</h2>
+    <p class="warn">Choose a master password you won't forget. There is <b>no way to recover it</b>:
+      without it, the vault can't be decrypted. That's the whole point.</p>
+    <label for="new-master">Master password (at least 12 characters)</label>
+    <input type="password" id="new-master" autocomplete="new-password">
+    <label for="confirm-master">Type it again</label>
+    <input type="password" id="confirm-master" autocomplete="new-password">
+    <div class="actions">
+      <button class="btn" id="create-btn">Create vault</button>
+      <button class="btn secondary" id="setup-import-btn">Import a vault file</button>
+    </div>
+    <p class="msg" id="setup-msg"></p>
+  </section>
+
+  <!-- 2. Vault exists but is locked -->
+  <section class="card hidden" id="unlock-screen">
+    <h2>Unlock your vault</h2>
+    <label for="master">Master password</label>
+    <input type="password" id="master" autocomplete="current-password">
+    <div class="actions">
+      <button class="btn" id="unlock-btn">Unlock</button>
+    </div>
+    <p class="msg" id="unlock-msg"></p>
+  </section>
+
+  <!-- 3. Vault is open -->
+  <section class="hidden" id="vault-screen">
+    <div class="topbar">
+      <span class="muted" id="count"></span>
+      <div class="row">
+        <button class="btn secondary small" id="export-btn">Export backup</button>
+        <button class="btn secondary small" id="import-btn">Import</button>
+        <button class="btn small" id="lock-btn">Lock</button>
+      </div>
+    </div>
+
+    <section class="card">
+      <h2>Add a login</h2>
+      <label for="site">Website or app</label>
+      <input type="text" id="site" placeholder="e.g. github.com" autocomplete="off">
+      <label for="username">Username or email</label>
+      <input type="text" id="username" autocomplete="off">
+      <label for="password">Password</label>
+      <div class="row">
+        <input type="text" id="password" autocomplete="off" spellcheck="false">
+        <button class="btn secondary" id="gen-btn" title="Generate a strong random password">Generate</button>
+      </div>
+      <div class="actions">
+        <button class="btn" id="add-btn">Save to vault</button>
+      </div>
+      <p class="msg" id="add-msg"></p>
+    </section>
+
+    <section class="card">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">Saved logins</h2>
+      </div>
+      <input type="search" id="search" placeholder="Search..." style="margin-top:12px" aria-label="Search saved logins">
+      <div id="list"></div>
+    </section>
+
+    <p class="muted" style="font-size:.85rem;text-align:center">Locks itself after 5 minutes without activity.</p>
+  </section>
+
+  <section class="card">
+    <details>
+      <summary>How does the encryption work?</summary>
+      <p><b>1. Key derivation (PBKDF2):</b> your master password is mixed with a random "salt" and hashed
+        600,000 times to make a 256-bit key. The slowness is on purpose: every guess an attacker makes costs them 600,000 hashes.
+        The salt means two people with the same password still get different keys.</p>
+      <p><b>2. Encryption (AES-256-GCM):</b> your logins are turned into JSON and encrypted with that key.
+        A fresh random "IV" is used every time you save, so the same data never encrypts the same way twice.</p>
+      <p><b>3. Tamper detection:</b> GCM adds an authentication tag. If anyone changes even one bit of the stored vault,
+        or the password is wrong, decryption fails instead of returning garbage.</p>
+      <p><b>4. What's stored:</b> only the salt, the IV and the encrypted data, in this browser's localStorage.
+        Your master password and the key are never saved. They only exist in memory while the vault is unlocked.</p>
+      <p class="warn" style="margin-top:12px">This is a learning project. For your real passwords, use a well-tested manager
+        like Bitwarden, 1Password or KeePassXC.</p>
+    </details>
+  </section>
+
+  <input type="file" id="file-input" accept=".json,application/json" class="hidden">
+</main>
+
+<script>
+  const STORAGE_KEY = "password-vault-v1";
+  const ITERATIONS = 600000;          // OWASP's 2023 recommendation for PBKDF2-SHA256
+  const AUTO_LOCK_MS = 5 * 60 * 1000; // 5 minutes
+
+  const $ = (id) => document.getElementById(id);
+  const enc = new TextEncoder();
+  const dec = new TextDecoder();
+
+  // While unlocked, these live ONLY in memory. Locking wipes them.
+  let key = null;      // the AES key derived from the master password
+  let salt = null;     // random salt stored alongside the vault
+  let entries = [];    // the decrypted logins
+  let lockTimer = null;
+
+  // ---------- Small helpers ----------
+
+  const toBase64 = (bytes) => btoa(String.fromCharCode(...bytes));
+  const fromBase64 = (str) => Uint8Array.from(atob(str), (c) => c.charCodeAt(0));
+  const randomBytes = (n) => crypto.getRandomValues(new Uint8Array(n));
+
+  function readStored() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch { return null; }
+  }
+
+  function showMsg(id, text, kind = "error") {
+    $(id).textContent = text;
+    $(id).className = "msg " + kind;
+  }
+
+  // ---------- The crypto part ----------
+
+  // Turn the master password into an AES key using PBKDF2.
+  async function deriveKey(password, salt, iterations) {
+    const baseKey = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]);
+    return crypto.subtle.deriveKey(
+      { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
+      baseKey,
+      { name: "AES-GCM", length: 256 },
+      false,                 // "non-extractable": even our own code can't read the raw key bytes
+      ["encrypt", "decrypt"],
+    );
+  }
+
+  // Encrypt the logins and save them. A NEW random IV every time.
+  async function saveVault() {
+    const iv = randomBytes(12);
+    const plaintext = enc.encode(JSON.stringify(entries));
+    const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext));
+    const vault = {
+      version: 1,
+      iterations: ITERATIONS,
+      salt: toBase64(salt),
+      iv: toBase64(iv),
+      data: toBase64(ciphertext),
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(vault));
+    return vault;
+  }
+
+  // Try to decrypt a stored vault. Throws if the password is wrong or the data was changed.
+  async function openVault(vault, password) {
+    const vaultSalt = fromBase64(vault.salt);
+    const vaultKey = await deriveKey(password, vaultSalt, vault.iterations);
+    const plaintext = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: fromBase64(vault.iv) },
+      vaultKey,
+      fromBase64(vault.data),
+    );
+    return { key: vaultKey, salt: vaultSalt, entries: JSON.parse(dec.decode(plaintext)) };
+  }
+
+  // ---------- Screens ----------
+
+  function showScreen(name) {
+    for (const s of ["setup", "unlock", "vault"]) $(s + "-screen").classList.toggle("hidden", s !== name);
+  }
+
+  function lock() {
+    key = null;
+    salt = null;
+    entries = [];
+    $("list").replaceChildren();
+    clearTimeout(lockTimer);
+    $("master").value = "";
+    showScreen(readStored() ? "unlock" : "setup");
+    showMsg("unlock-msg", "", "");
+  }
+
+  function resetLockTimer() {
+    if (!key) return;
+    clearTimeout(lockTimer);
+    lockTimer = setTimeout(() => {
+      lock();
+      showMsg("unlock-msg", "Locked automatically after 5 minutes.", "ok");
+    }, AUTO_LOCK_MS);
+  }
+
+  // ---------- Create / unlock ----------
+
+  $("create-btn").onclick = async () => {
+    const pw = $("new-master").value;
+    if (pw.length < 12) return showMsg("setup-msg", "Use at least 12 characters.");
+    if (pw !== $("confirm-master").value) return showMsg("setup-msg", "The two passwords don't match.");
+
+    showMsg("setup-msg", "Creating vault...", "ok");
+    salt = randomBytes(16);
+    key = await deriveKey(pw, salt, ITERATIONS);
+    entries = [];
+    await saveVault();
+    $("new-master").value = $("confirm-master").value = "";
+    enterVault();
+  };
+
+  async function unlock() {
+    const vault = readStored();
+    if (!vault) return lock();
+    showMsg("unlock-msg", "Unlocking...", "ok");
+    try {
+      ({ key, salt, entries } = await openVault(vault, $("master").value));
+      $("master").value = "";
+      enterVault();
+    } catch {
+      // AES-GCM refuses to decrypt with the wrong key, so a wrong password lands here.
+      showMsg("unlock-msg", "Wrong master password.");
+    }
+  }
+  $("unlock-btn").onclick = unlock;
+  $("master").onkeydown = (e) => { if (e.key === "Enter") unlock(); };
+
+  function enterVault() {
+    showScreen("vault");
+    renderList();
+    resetLockTimer();
+  }
+
+  // ---------- Add / delete ----------
+
+  // Secure random int with rejection sampling (see the Password Generator project).
+  function randomInt(max) {
+    const limit = Math.floor(0x100000000 / max) * max;
+    const buf = new Uint32Array(1);
+    do { crypto.getRandomValues(buf); } while (buf[0] >= limit);
+    return buf[0] % max;
+  }
+
+  $("gen-btn").onclick = () => {
+    const chars = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%^&*-_=+?";
+    $("password").value = Array.from({ length: 20 }, () => chars[randomInt(chars.length)]).join("");
+  };
+
+  $("add-btn").onclick = async () => {
+    const site = $("site").value.trim();
+    const username = $("username").value.trim();
+    const password = $("password").value;
+    if (!site || !password) return showMsg("add-msg", "Website and password are required.");
+
+    entries.push({ id: crypto.randomUUID(), site, username, password, added: Date.now() });
+    await saveVault();
+    $("site").value = $("username").value = $("password").value = "";
+    showMsg("add-msg", `Saved ${site}.`, "ok");
+    renderList();
+  };
+
+  async function deleteEntry(id) {
+    const entry = entries.find((e) => e.id === id);
+    if (!confirm(`Delete the login for ${entry.site}?`)) return;
+    entries = entries.filter((e) => e.id !== id);
+    await saveVault();
+    renderList();
+  }
+
+  // ---------- The list ----------
+
+  // Built with textContent, never innerHTML, so a saved "<script>" is shown as text, not run.
+  function renderList() {
+    const q = $("search").value.trim().toLowerCase();
+    const shown = entries
+      .filter((e) => !q || e.site.toLowerCase().includes(q) || e.username.toLowerCase().includes(q))
+      .sort((a, b) => a.site.localeCompare(b.site));
+
+    $("count").textContent = `${entries.length} saved login${entries.length === 1 ? "" : "s"}`;
+    const list = $("list");
+    list.replaceChildren();
+
+    if (shown.length === 0) {
+      const p = document.createElement("p");
+      p.className = "empty";
+      p.textContent = entries.length ? "No matches." : "Nothing saved yet.";
+      list.append(p);
+      return;
+    }
+
+    for (const e of shown) {
+      const box = el("div", "entry");
+      const head = el("div", "entry-head");
+      head.append(el("span", "entry-site", e.site), el("span", "entry-user", e.username));
+
+      const pass = el("div", "entry-pass", "••••••••••••");
+      let visible = false;
+
+      const showBtn = el("button", "btn secondary small", "Show");
+      showBtn.onclick = () => {
+        visible = !visible;
+        pass.textContent = visible ? e.password : "••••••••••••";
+        showBtn.textContent = visible ? "Hide" : "Show";
+      };
+
+      const copyBtn = el("button", "btn secondary small", "Copy password");
+      copyBtn.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(e.password);
+          copyBtn.textContent = "Copied!";
+        } catch {
+          copyBtn.textContent = "Copy failed";
+        }
+        setTimeout(() => (copyBtn.textContent = "Copy password"), 1500);
+      };
+
+      const delBtn = el("button", "btn danger small", "Delete");
+      delBtn.onclick = () => deleteEntry(e.id);
+
+      const actions = el("div", "row");
+      actions.append(showBtn, copyBtn, delBtn);
+      box.append(head, pass, actions);
+      list.append(box);
+    }
+  }
+
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  $("search").oninput = renderList;
+  $("lock-btn").onclick = lock;
+
+  // ---------- Backup: export / import ----------
+
+  // The exported file is the ENCRYPTED vault. It's useless without the master password.
+  $("export-btn").onclick = async () => {
+    const vault = await saveVault();
+    const blob = new Blob([JSON.stringify(vault, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `password-vault-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  $("import-btn").onclick = $("setup-import-btn").onclick = () => $("file-input").click();
+
+  $("file-input").onchange = async (event) => {
+    const file = event.target.files[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const vault = JSON.parse(await file.text());
+      if (!vault.salt || !vault.iv || !vault.data || !vault.iterations) throw new Error();
+      if (readStored() && !confirm("Replace the vault in this browser with the imported one?")) return;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(vault));
+      lock();
+      showMsg("unlock-msg", "Vault imported. Enter its master password.", "ok");
+    } catch {
+      alert("That file isn't a valid vault backup.");
+    }
+  };
+
+  // Any activity restarts the auto-lock countdown.
+  ["click", "keydown", "mousemove"].forEach((evt) => document.addEventListener(evt, resetLockTimer));
+
+  lock();
+</script>
+</body>
+</html>
